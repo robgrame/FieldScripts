@@ -81,8 +81,6 @@ Function Set-CMApplicationsDownloadFallback{
                     Write-Host -ForegroundColor Red ("Unable to update Application " + $pkg.Name + " to download fallback. Exception: " + $Error[0])
                     
                 }
-                
-
             }
         }
     }
@@ -126,11 +124,8 @@ function Set-CMPackageDownloadFallback {
                     
                     Write-Host -ForegroundColor Red ("Unable to update package " + $pkg.Name + " to download fallback. Exception: " + $Error[0])
                 }
-
             }
-
         }
-        
     }
     
     end {
@@ -171,14 +166,7 @@ function Set-CMSoftwareUpdateDownloadFallback {
                 Write-Host -ForegroundColor Red ("Unable to update Software Update Deployment " + $SUDep.AssignmentName + " to download fallback. Exception: " + $Error[0])
                 
             }
-
-
- 
-        }
-
-
-
-        
+        }  
     }
     
     end {
