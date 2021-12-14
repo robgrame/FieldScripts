@@ -1,6 +1,6 @@
 <#
 .Synopsis
-   The purpose of this script is to change the download settings of the Applications, Packages and Software Update Deployment in order to allow clients connected via VPN making use of CMG to leverage internet dowloads
+  The purpose of this script is to change the download settings of the Applications, Packages and Software Update Deployments in order to allow clients connected via VPN making   use of CMG to leverage internet dowloads
 .DESCRIPTION
 
 .EXAMPLE
