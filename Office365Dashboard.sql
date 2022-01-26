@@ -22,7 +22,7 @@ END AS 'Channel',
 CASE 
 	WHEN msoconf.VersionToReport0 = '' THEN 'Unknown'
 	WHEN msoconf.VersionToReport0 IS NULL THEN 'Unknown' 
-	--ELSE msoconf.VersionToReport0
+
 	when msoconf.VersionToReport0 like '16.0.14729.%' then '2112'
 	when msoconf.VersionToReport0 like '16.0.14701.%' then '2111'
 	when msoconf.VersionToReport0 like '16.0.14527.%' then '2110'
@@ -73,16 +73,16 @@ CASE
 	ELSE LastScenarioResult0
 END 'Last Scenario Result',
 WS.LastHWScan,
-GPOChannel0,
-AutoUpgrade0,
 CASE
 	WHEN CCMManaged0 = '' THEN 'No'
 	WHEN CCMManaged0 IS NULL THEN 'No'
 	ELSE 'Yes'
-END CCMManaged,
+END ConfigMgrManaged,
 r.User_Name0 UserName
 FROM v_GS_OFFICE365PROPLUSCONFIGURATIONS msoconf
 left JOIN V_R_SYSTEM r ON r.ResourceID = msoconf.ResourceID
 left JOIN v_GS_WORKSTATION_STATUS AS ws ON ws.ResourceID = r.ResourceID
 left join v_ClientCoManagementState comgmt on comgmt.ResourceID = msoconf.ResourceID
 where cast(comgmt.mdmworkloads as bigint) > 129 and cast(comgmt.mdmworkloads as bigint) < 255
+
+
