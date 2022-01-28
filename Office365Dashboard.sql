@@ -11,18 +11,17 @@ comgmt.MDMProvisioned,
 CASE WHEN msoconf.Platform0 = '' THEN 'Unknown' WHEN msoconf.Platform0 IS NULL THEN 'Unknown' ELSE msoconf.Platform0 END Platform,
 CASE 
 	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/55336b82-a18d-4dd6-b5f6-9e5095c314a6' THEN 'Monthly Enterprise'
-	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/492350f6-3a01-4f97-b9c0-c7c6ddf67d60'	THEN 'Current'
-	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/64256afe-f5d9-4f86-8936-8840a6a4f5be'	THEN 'Current (Preview)'
-	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/7ffbc6bf-bc32-4f92-8982-f9dd17fd3114'	THEN 'Semi-Annual Enterprise'
-	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/b8f9b850-328d-4355-9145-c59439a0c4cf'	THEN 'Semi-Annual Enterprise (Preview)'
-	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/5440fd1f-7ecb-4221-8110-145efaa6372f'	THEN 'Beta'
+	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/492350f6-3a01-4f97-b9c0-c7c6ddf67d60' THEN 'Current'
+	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/64256afe-f5d9-4f86-8936-8840a6a4f5be' THEN 'Current (Preview)'
+	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/7ffbc6bf-bc32-4f92-8982-f9dd17fd3114' THEN 'Semi-Annual Enterprise'
+	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/b8f9b850-328d-4355-9145-c59439a0c4cf' THEN 'Semi-Annual Enterprise (Preview)'
+	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/5440fd1f-7ecb-4221-8110-145efaa6372f' THEN 'Beta'
 	WHEN msoconf.CDNBaseUrl0 = 'http://officecdn.microsoft.com/pr/f2e724c1-748f-4b47-8fb8-8e0d210e9208' THEN 'Office 2019 Perpetual'
 ELSE 'Office 365 Not Detected'
 END AS 'Channel',
 CASE 
 	WHEN msoconf.VersionToReport0 = '' THEN 'Unknown'
 	WHEN msoconf.VersionToReport0 IS NULL THEN 'Unknown' 
-
 	when msoconf.VersionToReport0 like '16.0.14729.%' then '2112'
 	when msoconf.VersionToReport0 like '16.0.14701.%' then '2111'
 	when msoconf.VersionToReport0 like '16.0.14527.%' then '2110'
@@ -45,7 +44,6 @@ CASE
 	when msoconf.VersionToReport0 like '16.0.12827.%' then '2005'
 	when msoconf.VersionToReport0 like '16.0.12730.%' then '2004'
 	when msoconf.VersionToReport0 like '16.0.12624.%' then '2003'
-
 	when msoconf.VersionToReport0 like '16.0.12527.%' then '2002'
 	when msoconf.VersionToReport0 like '16.0.12430.%' then '2001'
 	when msoconf.VersionToReport0 like '16.0.11929.%' then '1908'
