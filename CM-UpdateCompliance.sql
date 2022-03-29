@@ -270,7 +270,7 @@ ucs.Status [State], st.StateName,
 (case when ctm.ResourceID is not null then '*' else '' end) [Targeted], 
 (CASE WHEN ucs.Status = 3 THEN '*' ELSE '' END) AS [Installed],  
 (CASE WHEN ucs.Status = 2 THEN '*' ELSE '' END) AS [Required],
-qfe.InstalledOn0
+qfe.InstalledOn0 'InstalledDate'
 from fn_ListUpdateComplianceStatus(1040) ucs
 left join #temp_UpdatesDetail ul on ul.CI_ID = ucs.CI_ID
 inner join #temp_MachineList ml on ml.ResourceID = ucs.MachineID
