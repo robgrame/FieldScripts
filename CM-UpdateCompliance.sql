@@ -3,7 +3,7 @@ declare @locale  nvarchar = @@Language
 DECLARE @lcid int = dbo.fn_LShortNameToLCID(@Locale) 
 
 --Set the CollectionID
-declare @CollID nvarchar(8) = 'SMSDM003' --CollectionID for All Windows 7 Systems
+declare @CollID nvarchar(8) = 'SMSDM003' --CollectionID for All Desktop and Server Clients
 
 -- Create table to store list of updates 
 --Remove previous temporary table if exists
@@ -179,76 +179,6 @@ FROM v_r_system r
 inner join v_FullCollectionMembership fcm on fcm.ResourceID = r.ResourceID and fcm.CollectionID = @CollID
 
 
--- Create table to store list of update installation details
--- Remove previous temporary table if exists
-IF OBJECT_ID(N'TempDB.DBO.#temp_UpdateInstallation') IS NOT NULL
-BEGIN
-	DROP TABLE #temp_UpdateInstallation
-END
-
---Create table to store update classification for each update
-CREATE TABLE #temp_UpdateInstallation
-(
-	[ResourceID] [int] NOT NULL,
-	[hotfix] nvarchar(16) NOT NULL,
-	[installedOn] datetime not null
-)
-
-insert into #temp_UpdateInstallation
-SELECT
-qfeinst.ResourceID,
-'KB'+upd.ArticleID hotfix,
-qfeinst.InstalledOn0 [installedOn]
-
-FROM V_GS_Quick_Fix_Engineering qfeinst
-inner join #temp_UpdatesDetail upd on 'KB'+upd.ArticleID = qfeinst.HotFixID0
-inner join #temp_MachineList ml on ml.ResourceID = qfeinst.ResourceID
-
-
-
--- Create table to store whether a machine is targeted by an update
---Remove previous temporary table if exists
-IF OBJECT_ID(N'TempDB.DBO.#temp_CITargetedMachine') IS NOT NULL
-BEGIN
-	DROP TABLE #temp_CITargetedMachine
-END
-
---Create table to store update classification for each update
-CREATE TABLE #temp_CITargetedMachine
-(
-	[ResourceID] [int] NULL,
-	[CI_ID] [int] NOT NULL,
-	[Targeted] varchar(1),
-	[DeploymentName] nvarchar(64),
-	[Deadline] datetime
-)
-
-insert into #temp_CITargetedMachine
-SELECT
-ctm.ResourceID,
-cdl.CI_ID,
-CASE 
-WHEN ml.ResourceID IS NOT NULL THEN '*' 
-ELSE '' 
-END AS Targeted,
-isnull(cdl.AssignmentName,'') DeploymentName,
-isnull(cdl.Deadline,'') Deadline
-FROM v_CITargetedMachines ctm
-inner join (
-select
-atc.CI_ID,
-a.AssignmentName,
-min(a.EnforcementDeadline) AS Deadline
-from v_CIAssignment AS a
-inner JOIN v_CIAssignmentToCI AS atc ON atc.AssignmentID = a.AssignmentID
-where a.AssignmentType = 5
-GROUP BY atc.CI_ID, a.AssignmentName
-) AS cdl ON cdl.CI_ID = ctm.CI_ID
-left join #temp_MachineList ml on ml.ResourceID = ctm.ResourceID
-
-
-
-
 
 select distinct
 ml.ResourceID,
@@ -262,7 +192,7 @@ ul.Product,
 ul.UpdateClassification,
 ul.SeverityLevel,
 ul.DatePosted,
-cdl.Deadline,
+cdl.EnforcementDeadline,
 ul.IsSuperseded,
 ul.IsExpired,
 
@@ -270,24 +200,26 @@ ucs.Status [State], st.StateName,
 (case when ctm.ResourceID is not null then '*' else '' end) [Targeted], 
 (CASE WHEN ucs.Status = 3 THEN '*' ELSE '' END) AS [Installed],  
 (CASE WHEN ucs.Status = 2 THEN '*' ELSE '' END) AS [Required],
+(CASE WHEN ucs.Status = 1 THEN '*' ELSE '' END) AS [Update is not Required],
 qfe.InstalledOn0 'InstalledDate'
-from fn_ListUpdateComplianceStatus(1040) ucs
+from v_Update_ComplianceStatusAll ucs
 left join #temp_UpdatesDetail ul on ul.CI_ID = ucs.CI_ID
-inner join #temp_MachineList ml on ml.ResourceID = ucs.MachineID
+inner join #temp_MachineList ml on ml.ResourceID = ucs.ResourceID
 left join v_StateNames st on st.StateID = ucs.Status and st.TopicType = 500
 left join v_CITargetedMachines  ctm on ctm.CI_ID=ucs.CI_ID and ctm.ResourceID =ml.ResourceID
-left join (
+inner join (
             select 
 			atc.CI_ID,
 			a.AssignmentName,
-			Deadline=min(a.EnforcementDeadline)
+			a.EnforcementDeadline,
+			atm.ResourceID
+			from v_CIAssignment a 
+			inner join v_CIAssignmentTargetedMachines atm on atm.AssignmentID = a.AssignmentID
+			left join v_CIAssignmentToCI  atc on atc.AssignmentID=a.AssignmentID
+			where a.AssignmentType in (1,5)
 			
-            from v_CIAssignment a 
-            inner join v_CIAssignmentToCI  atc on atc.AssignmentID=a.AssignmentID
-			where a.AssignmentType = 5
-			GROUP BY atc.CI_ID, a.AssignmentName
-            ) cdl on cdl.CI_ID = ucs.CI_ID
-left join V_GS_Quick_Fix_Engineering qfe on qfe.HotFixID0 = 'KB'+ucs.ArticleID and qfe.ResourceID = ucs.MachineID
+            ) cdl on cdl.CI_ID = ctm.CI_ID and cdl.ResourceID = ctm.ResourceID
+left join V_GS_Quick_Fix_Engineering qfe on qfe.HotFixID0 = 'KB'+ul.ArticleID and qfe.ResourceID = ctm.ResourceID
 
 
 
