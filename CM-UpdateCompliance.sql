@@ -138,6 +138,7 @@ INNER JOIN #temp_ProductUpdateList prodl on ui.CI_ID = prodl.CI_ID
 WHERE  
 ui.CIType_ID in (1,8) 
 and ui.IsHidden=0 
+and prodl.Product not in ('Windows 10','Windows 10, version 1903 and later','Windows 7','Windows 11','Windows 10 LTSB','Windows 10 LTSC')
 
 CREATE NONCLUSTERED INDEX [#temp_UpdatesDetail_IDX1] ON #temp_UpdatesDetail
 (
