@@ -1,0 +1,1 @@
+Get-WinEvent -LogName 'Microsoft-Windows-Diagnostics-Performance/Operational' | Select-Object TimeCreated, ID, ProviderName, LevelDisplayName, Message | Where-Object -FilterScript {($_.ID -eq 200) -and ($_.TimeCreated -ge (Get-Date).AddHours(-48))}
