@@ -248,7 +248,7 @@ If ($Overwrite -eq1) {
 
     Else{
             Write-host "-----------------"
-            Write-Host -ForegroundColor Green "Script execution completed without error. Operational Collections created sucessfully."
+            Write-Host -ForegroundColor Green "Script execution completed without error. Co-Maanagement Collections created sucessfully."
             Write-host "-----------------"
             Pause
         }
