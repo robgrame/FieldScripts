@@ -29,10 +29,10 @@
 # Enable TLS 1.2 support 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 # Replace with your Log Analytics Workspace ID
-$CustomerId = "331b5606-d9cd-4ce6-84de-df26903c39ff"  
+$CustomerId = ""  
 
 # Replace with your Primary Key
-$SharedKey = "fKNU0KRtHU33D4Lp7npiLzHkKXenWMZe5t/+hqpSDfItaveVBXN6T54TnNQQb5NN+ItuwE350b2IlMfoC43PTw=="
+$SharedKey = ""
 
 #Control if you want to collect App or Device Inventory or both (True = Collect)
 $CollectAppInventory = $false
