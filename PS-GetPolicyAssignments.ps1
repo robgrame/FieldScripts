@@ -458,7 +458,7 @@ function Get-AuthToken {
         [parameter(Mandatory=$false)]
         [ValidateNotNullOrEmpty()]
         $GroupName,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory=$false)]
         [ValidateNotNullOrEmpty()]
         $id,
         [parameter(Mandatory=$false)]
@@ -534,7 +534,397 @@ function Get-AuthToken {
     
     }
     
-    ####################################################
+####################################################
+
+Function Get-IntuneApplication(){
+
+<#
+.SYNOPSIS
+This function is used to get applications from the Graph API REST interface
+.DESCRIPTION
+The function connects to the Graph API Interface and gets any applications added
+.EXAMPLE
+Get-IntuneApplication
+Returns any applications configured in Intune
+.NOTES
+NAME: Get-IntuneApplication
+#>
+
+[cmdletbinding()]
+
+$graphApiVersion = "Beta"
+$Resource = "deviceAppManagement/mobileApps"
+    
+    try {
+        
+    $uri = "https://graph.microsoft.com/$graphApiVersion/$($Resource)"
+    (Invoke-RestMethod -Uri $uri –Headers $authToken –Method Get).Value | ? { (!($_.'@odata.type').Contains("managed")) }
+
+    }
+    
+    catch {
+
+    $ex = $_.Exception
+    Write-Host "Request to $Uri failed with HTTP Status $([int]$ex.Response.StatusCode) $($ex.Response.StatusDescription)" -f Red
+    $errorResponse = $ex.Response.GetResponseStream()
+    $reader = New-Object System.IO.StreamReader($errorResponse)
+    $reader.BaseStream.Position = 0
+    $reader.DiscardBufferedData()
+    $responseBody = $reader.ReadToEnd();
+    Write-Host "Response content:`n$responseBody" -f Red
+    Write-Error "Request to $Uri failed with HTTP Status $($ex.Response.StatusCode) $($ex.Response.StatusDescription)"
+    write-host
+    break
+
+    }
+
+}
+
+####################################################
+
+Function Get-ApplicationAssignment(){
+
+<#
+.SYNOPSIS
+This function is used to get an application assignment from the Graph API REST interface
+.DESCRIPTION
+The function connects to the Graph API Interface and gets an application assignment
+.EXAMPLE
+Get-ApplicationAssignment
+Returns an Application Assignment configured in Intune
+.NOTES
+NAME: Get-ApplicationAssignment
+#>
+
+[cmdletbinding()]
+
+param
+(
+    $ApplicationId
+)
+
+$graphApiVersion = "Beta"
+$Resource = "deviceAppManagement/mobileApps/$ApplicationId/?`$expand=categories,assignments"
+    
+    try {
+        
+        if(!$ApplicationId){
+
+        write-host "No Application Id specified, specify a valid Application Id" -f Red
+        break
+
+        }
+
+        else {
+        
+        $uri = "https://graph.microsoft.com/$graphApiVersion/$($Resource)"
+        (Invoke-RestMethod -Uri $uri –Headers $authToken –Method Get)
+        
+        }
+    
+    }
+    
+    catch {
+
+    $ex = $_.Exception
+    $errorResponse = $ex.Response.GetResponseStream()
+    $reader = New-Object System.IO.StreamReader($errorResponse)
+    $reader.BaseStream.Position = 0
+    $reader.DiscardBufferedData()
+    $responseBody = $reader.ReadToEnd();
+    Write-Host "Response content:`n$responseBody" -f Red
+    Write-Error "Request to $Uri failed with HTTP Status $($ex.Response.StatusCode) $($ex.Response.StatusDescription)"
+    write-host
+    break
+
+    }
+
+} 
+
+####################################################
+
+Function Add-ApplicationAssignment(){
+
+<#
+.SYNOPSIS
+This function is used to add an application assignment using the Graph API REST interface
+.DESCRIPTION
+The function connects to the Graph API Interface and adds a application assignment
+.EXAMPLE
+Add-ApplicationAssignment -ApplicationId $ApplicationId -TargetGroupId $TargetGroupId -InstallIntent $InstallIntent
+Adds an application assignment in Intune
+.NOTES
+NAME: Add-ApplicationAssignment
+#>
+
+[cmdletbinding()]
+
+param
+(
+    $ApplicationId,
+    $TargetGroupId,
+    [ValidateSet("available", "required")]
+    $InstallIntent
+)
+
+$graphApiVersion = "Beta"
+$Resource = "deviceAppManagement/mobileApps/$ApplicationId/assign"
+    
+    try {
+
+        if(!$ApplicationId){
+
+        write-host "No Application Id specified, specify a valid Application Id" -f Red
+        break
+
+        }
+
+        if(!$TargetGroupId){
+
+        write-host "No Target Group Id specified, specify a valid Target Group Id" -f Red
+        break
+
+        }
+
+        
+        if(!$InstallIntent){
+
+        write-host "No Install Intent specified, specify a valid Install Intent - available, notApplicable, required, uninstall, availableWithoutEnrollment" -f Red
+        break
+
+        }
+
+$AssignedGroups = (Get-ApplicationAssignment -ApplicationId $ApplicationId).assignments
+
+if($AssignedGroups){
+
+$App_Count = @($AssignedGroups).count
+$i = 1
+
+    if($AssignedGroups.target.GroupId -contains $TargetGroupId){
+
+        Write-Host "'$AADGroup' is already targetted to this application, can't add an AAD Group already assigned..." -f Red
+
+    }
+
+    else {
+
+# Creating header of JSON File
+$JSON = @"
+{
+    "mobileAppAssignments": [
+    {
+      "@odata.type": "#microsoft.graph.mobileAppAssignment",
+      "target": {
+        "@odata.type": "#microsoft.graph.groupAssignmentTarget",
+        "groupId": "$TargetGroupId"
+      },
+      "intent": "$InstallIntent"
+    },
+"@
+
+# Looping through all existing assignments and adding them to the JSON object
+foreach($Assignment in $AssignedGroups){
+
+$ExistingTargetGroupId = $Assignment.target.GroupId
+$ExistingInstallIntent = $Assignment.intent
+
+$JSON += @"
+    
+    {
+      "@odata.type": "#microsoft.graph.mobileAppAssignment",
+      "target": {
+        "@odata.type": "#microsoft.graph.groupAssignmentTarget",
+        "groupId": "$ExistingTargetGroupId"
+      },
+      "intent": "$ExistingInstallIntent"
+"@
+
+if($i -ne $App_Count){
+
+$JSON += @"
+    },
+"@
+
+}
+
+else {
+
+$JSON += @"
+    }
+"@
+
+}
+
+$i++
+
+}
+
+# Adding close of JSON object
+$JSON += @"
+    ]
+}
+"@
+
+    $uri = "https://graph.microsoft.com/$graphApiVersion/$($Resource)"
+    Invoke-RestMethod -Uri $uri -Headers $authToken -Method Post -Body $JSON -ContentType "application/json"
+
+    }
+
+}
+
+else {
+
+$JSON = @"
+{
+    "mobileAppAssignments": [
+    {
+        "@odata.type": "#microsoft.graph.mobileAppAssignment",
+        "target": {
+        "@odata.type": "#microsoft.graph.groupAssignmentTarget",
+        "groupId": "$TargetGroupId"
+        },
+        "intent": "$InstallIntent"
+    }
+    ]
+}
+"@
+
+$uri = "https://graph.microsoft.com/$graphApiVersion/$($Resource)"
+Invoke-RestMethod -Uri $uri -Headers $authToken -Method Post -Body $JSON -ContentType "application/json"
+
+}
+
+    }
+    
+    catch {
+
+    $ex = $_.Exception
+    $errorResponse = $ex.Response.GetResponseStream()
+    $reader = New-Object System.IO.StreamReader($errorResponse)
+    $reader.BaseStream.Position = 0
+    $reader.DiscardBufferedData()
+    $responseBody = $reader.ReadToEnd();
+    Write-Host "Response content:`n$responseBody" -f Red
+    Write-Error "Request to $Uri failed with HTTP Status $($ex.Response.StatusCode) $($ex.Response.StatusDescription)"
+    write-host
+    break
+
+    }
+
+}
+
+####################################################
+
+
+
+
+
+Function Get-DeviceCompliancePolicy(){
+
+    <#
+    .SYNOPSIS
+    This function is used to get device compliance policies from the Graph API REST interface
+    .DESCRIPTION
+    The function connects to the Graph API Interface and gets any device compliance policies
+    .EXAMPLE
+    Get-DeviceCompliancePolicy
+    Returns any device compliance policies configured in Intune
+    .EXAMPLE
+    Get-DeviceCompliancePolicy -Android
+    Returns any device compliance policies for Android configured in Intune
+    .EXAMPLE
+    Get-DeviceCompliancePolicy -iOS
+    Returns any device compliance policies for iOS configured in Intune
+    .NOTES
+    NAME: Get-DeviceCompliancePolicy
+    #>
+    
+    [cmdletbinding()]
+    
+    param
+    (
+        $Name,
+        [switch]$Android,
+        [switch]$iOS,
+        [switch]$Win10
+    )
+    
+    $graphApiVersion = "Beta"
+    $Resource = "deviceManagement/deviceCompliancePolicies"
+    
+        try {
+    
+            $Count_Params = 0
+    
+            if($Android.IsPresent){ $Count_Params++ }
+            if($iOS.IsPresent){ $Count_Params++ }
+            if($Win10.IsPresent){ $Count_Params++ }
+            if($Name.IsPresent){ $Count_Params++ }
+    
+            if($Count_Params -gt 1){
+    
+            write-host "Multiple parameters set, specify a single parameter -Android -iOS or -Win10 against the function" -f Red
+    
+            }
+    
+            elseif($Android){
+    
+            $uri = "https://graph.microsoft.com/$graphApiVersion/$($Resource)"
+            (Invoke-RestMethod -Uri $uri -Headers $authToken -Method Get).Value | Where-Object { ($_.'@odata.type').contains("android") }
+    
+            }
+    
+            elseif($iOS){
+    
+            $uri = "https://graph.microsoft.com/$graphApiVersion/$($Resource)"
+            (Invoke-RestMethod -Uri $uri -Headers $authToken -Method Get).Value | Where-Object { ($_.'@odata.type').contains("ios") }
+    
+            }
+    
+            elseif($Win10){
+    
+            $uri = "https://graph.microsoft.com/$graphApiVersion/$($Resource)"
+            (Invoke-RestMethod -Uri $uri -Headers $authToken -Method Get).Value | Where-Object { ($_.'@odata.type').contains("windows10CompliancePolicy") }
+    
+            }
+    
+            elseif($Name){
+    
+            $uri = "https://graph.microsoft.com/$graphApiVersion/$($Resource)"
+            (Invoke-RestMethod -Uri $uri -Headers $authToken -Method Get).Value | Where-Object { ($_.'displayName').contains("$Name") }
+    
+            }
+    
+            else {
+    
+            $uri = "https://graph.microsoft.com/$graphApiVersion/$($Resource)"
+            (Invoke-RestMethod -Uri $uri -Headers $authToken -Method Get).Value
+    
+            }
+    
+        }
+    
+        catch {
+    
+        $ex = $_.Exception
+        $errorResponse = $ex.Response.GetResponseStream()
+        $reader = New-Object System.IO.StreamReader($errorResponse)
+        $reader.BaseStream.Position = 0
+        $reader.DiscardBufferedData()
+        $responseBody = $reader.ReadToEnd();
+        Write-Host "Response content:`n$responseBody" -f Red
+        Write-Error "Request to $Uri failed with HTTP Status $($ex.Response.StatusCode) $($ex.Response.StatusDescription)"
+        write-host
+        break
+    
+        }
+    
+    }
+
+    ##########################################################################
+
+
     
     #region Authentication
 
@@ -614,27 +1004,73 @@ function Get-AuthToken {
     
     #endregion
 
+    ####################################################
+    
+    # Setting application AAD Group to assign Policy
+    
+    $AADGroup = Read-Host -Prompt "Enter the Azure AD Group name where policies will be assigned"
+    if($null -eq $AADGroup -or $AADGroup -eq ""){
+    
+        Write-Host "AAD Group is a mandatory parameter. Please specify a valid AAD Group Name..." -ForegroundColor Red
+        Write-Host
+        exit
+        
+
+    } 
+    else {
+        try {
+            $TargetGroupID = (Get-AADGroup -GroupName $AADGroup).Id
+            if($null -eq $TargetGroupID -or $TargetGroupID -eq ""){
+                Write-Host "AAD Group - '$AADGroup' doesn't exist, please specify a valid AAD Group..." -ForegroundColor Red            
+                Write-Host
+                exit
+            }
+        }
+        catch [System.Exception] {
+            Write-Warning -Message "Failed to retrieve AAD Group"
+            Write-Host
+            exit
+        } 
+    }
+    
+<#     $TargetGroupId = (Get-AADGroup -GroupName $AADGroup).Id
+    
+    
+        if($TargetGroupId -eq $null -or $TargetGroupId -eq ""){
+    
+            Write-Host "AAD Group - '$AADGroup' doesn't exist, please specify a valid AAD Group..." -ForegroundColor Red
+            Write-Host
+            exit
+    
+        } #>
+    
+    ####################################################
+
 
     $intunePolicies = Get-DeviceConfigurationPolicy
-    $intunePolicyArray = @()
+    $IntunePolicyAssignmentsArray = @()
 
 
     foreach ($policy in $intunePolicies){
 
         $policyAssignments = Get-DeviceConfigurationPolicyAssignment -id $policy.id
-
      
         if ($policyAssignments){
-            $IntunePolicyAssignmentsArray = @()
+            
             foreach($policyAssignment in $policyAssignments){
                 
                 
                 $AssignmentGroup = Get-AADGroup -id $policyAssignment.targetGroupId
 
                 $policyAssignmentDetails = new-object -TypeName PSObject
-                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "ID" -Value $policyAssignment.id
-                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "IncludedGroupID" -Value $policyAssignment.targetGroupId
-                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "GroupName" -Value $AssignmentGroup.displayName
+                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "PolicyId" -Value $policy.id -Force
+                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "DisplayName" -Value $policy.displayName -Force
+                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "Description" -Value $policy.description -Force
+                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "Type" -Value $policy.'@odata.type' -Force
+                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "Version" -Value $policy.version -Force
+                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "AssignmentID" -Value $policyAssignment.id
+                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "TargetGroupID" -Value $policyAssignment.targetGroupId
+                $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "TargetGroupName" -Value $AssignmentGroup.displayName
                 $policyAssignmentDetails | Add-Member -MemberType NoteProperty -Name "Excluded" -Value $policyAssignment.excludeGroup
 
                 $IntunePolicyAssignmentsArray += $policyAssignmentDetails
@@ -643,27 +1079,38 @@ function Get-AuthToken {
             [System.Collections.ArrayList]$IntunePolicyAssignmentsArrayList = $IntunePolicyAssignmentsArray
 
         }
-
-
-
-
-
-        # Create custom PSObject
-        $policyInfo = new-object -TypeName PSObject
-
-        $policyInfo | Add-Member -MemberType NoteProperty -Name "Id" -Value $policy.id -Force
-        $policyInfo | Add-Member -MemberType NoteProperty -Name "DataType" -Value $policy.'@odata.type' -Force
-        $policyInfo | Add-Member -MemberType NoteProperty -Name "DisplayName" -Value $policy.displayName -Force
-        $policyInfo | Add-Member -MemberType NoteProperty -Name "Description" -Value $policy.description -Force
-        $policyInfo | Add-Member -MemberType NoteProperty -Name "CreationDateTime" -Value $policy.createdDateTime -Force
-        $policyInfo | Add-Member -MemberType NoteProperty -Name "LastModifiedDateTime" -Value $policy.lastModifiedDateTime -Force
-        if ($IntunePolicyAssignmentsArrayList){
-            $policyInfo | Add-Member -MemberType NoteProperty -Name "PolicyAssignment" -Value $IntunePolicyAssignmentsArrayList -Force
-        }
         
-
-
-        $intunePolicyArray += $policyInfo
     }
 
-    [System.Collections.ArrayList]$intunePolicyArrayList = $intunePolicyArray
+
+
+        $IntunePolicyAssignmentsArrayList | Where-Object {$_.TargetGroupName -ilike "$AADGroup"} | Format-List
+
+
+
+
+
+    
+
+    
+    <#
+    $PolicyName = "Device Configuration Policy Name"
+    
+    $DCP = Get-DeviceConfigurationPolicy -name "$PolicyName"
+    
+    if($DCP){
+    
+        $Assignment = Add-DeviceConfigurationPolicyAssignment -ConfigurationPolicyId $DCP.id -TargetGroupId $TargetGroupId -AssignmentType Included
+        Write-Host "Assigned '$AADGroup' to $($DCP.displayName)/$($DCP.id)" -ForegroundColor Green
+        Write-Host
+    
+    }
+    
+    else {
+    
+        Write-Host "Can't find Device Configuration Policy with name '$PolicyName'..." -ForegroundColor Red
+        Write-Host 
+    
+    } #>
+
+
