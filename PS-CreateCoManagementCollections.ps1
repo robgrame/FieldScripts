@@ -14,7 +14,7 @@ Set-WmiInstance -Namespace "root\sms\site_$($SiteCode.Name)" -Class "SMS_ObjectC
 $FolderPath =($SiteCode.Name +":\DeviceCollection\" + $CollectionFolder.Name)
 
 #Set Default limiting collections
-$LimitingCollection = 'All Desktop and Server Clients'
+$LimitingCollection = 'Co-management Eligible Devices'
 
 #Refresh Schedule
 $Schedule = New-CMSchedule -RecurInterval Days -RecurCount 1
