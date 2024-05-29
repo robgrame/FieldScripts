@@ -54,13 +54,17 @@ if ($details.CsPartOfDomain) {
 }
 
 # Make sure we have connectivity
-$goodToGo = $true
+
 if ($isAD) {
     $dcInfo = [ADSI]"LDAP://RootDSE"
     if ($null -eq $dcInfo.dnsHostName)
     {
         Write-Host "No connectivity to the domain, unable to rename at this point."
         $goodToGo = $false
+    }
+    else {
+        Write-Host "Connected to domain: $($dcInfo.dnsHostName)"
+        $goodToGo = $true
     }
 }
 
@@ -107,8 +111,33 @@ if ($goodToGo)
 
     #try to rename the computer
     try {
-        Rename-Computer -NewName $newName -Force -ErrorAction Stop
-    } catch {
+        Rename-Computer -NewName $newName -Force -ErrorVariable renameError -ErrorAction SilentlyContinue
+
+        if ($renameError)
+        {
+            Write-Host "Failed to rename computer to $($newName) due to: $($renameError.Exception.Message)"
+            throw $renameError
+        }
+        else {
+            # Make sure we reboot if still in ESP/OOBE by reporting a 1641 return code (hard reboot)
+            if ($details.CsUserName -match "defaultUser")
+            {
+                Write-Host "Exiting during ESP/OOBE with return code 1641"
+                Stop-Transcript
+                Exit 1641
+            }
+            else {
+                Write-Host "Initiating a restart in 10 minutes"
+                & shutdown.exe /g /t 600 /f /c "Restarting the computer due to a computer name change.  Save your work."
+                Stop-Transcript
+                Exit 0
+            }
+        }
+
+
+    } 
+    catch
+     {
         Write-Host "Failed to rename computer to $($newName), creating Scheduled Task to retry later."
 
         # Check to see if already scheduled
@@ -147,19 +176,7 @@ if ($goodToGo)
     }
     
 
-    # Make sure we reboot if still in ESP/OOBE by reporting a 1641 return code (hard reboot)
-    if ($details.CsUserName -match "defaultUser")
-    {
-        Write-Host "Exiting during ESP/OOBE with return code 1641"
-        Stop-Transcript
-        Exit 1641
-    }
-    else {
-        Write-Host "Initiating a restart in 10 minutes"
-        & shutdown.exe /g /t 600 /f /c "Restarting the computer due to a computer name change.  Save your work."
-        Stop-Transcript
-        Exit 0
-    }
+
 }
 else
 {
@@ -194,3 +211,5 @@ else
 }
 
 Stop-Transcript
+
+
