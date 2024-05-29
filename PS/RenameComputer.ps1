@@ -26,6 +26,7 @@ if (-not (Test-Path $dest))
     mkdir $dest
 }
 Start-Transcript "$dest\RenameComputer.log" -Append
+$details = Get-ComputerInfo
 
 # See if we are AD or AAD joined
 $isAD = $false
