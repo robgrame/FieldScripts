@@ -26,7 +26,6 @@ if (-not (Test-Path $dest))
     mkdir $dest
 }
 Start-Transcript "$dest\RenameComputer.log" -Append
-$details = Get-ComputerInfo
 
 # See if we are AD or AAD joined
 $isAD = $false
@@ -105,7 +104,48 @@ if ($goodToGo)
 
     # Set the computer name
     Write-Host "Renaming computer to $($newName)"
-    Rename-Computer -NewName $newName -Force
+
+    #try to rename the computer
+    try {
+        Rename-Computer -NewName $newName -Force -ErrorAction Stop
+    } catch {
+        Write-Host "Failed to rename computer to $($newName), creating Scheduled Task to retry later."
+
+        # Check to see if already scheduled
+        $existingTask = Get-ScheduledTask -TaskName "RenameComputer" -ErrorAction SilentlyContinue
+        if ($existingTask -ne $null)
+        {
+            Write-Host "Scheduled task already exists."
+            Stop-Transcript
+            Exit 0
+        }
+
+        # Copy myself to a safe place if not already there
+        if (-not (Test-Path "$dest\RenameComputer.ps1"))
+        {
+            Copy-Item $PSCommandPath "$dest\RenameComputer.PS1"
+        }
+
+        # Create the scheduled task action
+        $action = New-ScheduledTaskAction -Execute "Powershell.exe" -Argument "-NoProfile -ExecutionPolicy bypass -WindowStyle Hidden -File $dest\RenameComputer.ps1"
+
+        # Create the scheduled task trigger
+        $timespan = New-Timespan -minutes 5
+        $triggers = @()
+        $triggers += New-ScheduledTaskTrigger -Daily -At 9am
+        $triggers += New-ScheduledTaskTrigger -AtLogOn -RandomDelay $timespan
+        $triggers += New-ScheduledTaskTrigger -AtStartup -RandomDelay $timespan
+        
+        # Register the scheduled task
+        Register-ScheduledTask -User SYSTEM -Action $action -Trigger $triggers -TaskName "RenameComputer" -Description "RenameComputer" -Force
+        Write-Host "Scheduled task created."
+
+
+
+        Stop-Transcript
+        Exit 1
+    }
+    
 
     # Make sure we reboot if still in ESP/OOBE by reporting a 1641 return code (hard reboot)
     if ($details.CsUserName -match "defaultUser")
@@ -154,6 +194,3 @@ else
 }
 
 Stop-Transcript
-
-
-
