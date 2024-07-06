@@ -3,11 +3,11 @@ Import-Module ScheduledTasks
 
  
 # Create a tag file just so Intune knows this was installed
-if (-not (Test-Path "$($env:ProgramData)\Microsoft\RenameComputer"))
+if (-not (Test-Path "$($env:ProgramData)\Microsoft\Intune-RenameComputer"))
 {
-    Mkdir "$($env:ProgramData)\Microsoft\RenameComputer"
+    Mkdir "$($env:ProgramData)\Microsoft\Intune-RenameComputer"
 }
-Set-Content -Path "$($env:ProgramData)\Microsoft\RenameComputer\RenameComputer.ps1.tag" -Value "Installed"
+Set-Content -Path "$($env:ProgramData)\Microsoft\Intune-RenameComputer\Intune-RenameComputer.ps1.tag" -Value "Installed"
 
 # If we are running as a 32-bit process on an x64 system, re-launch as a 64-bit process
 if ("$env:PROCESSOR_ARCHITEW6432" -ne "ARM64")
@@ -20,12 +20,12 @@ if ("$env:PROCESSOR_ARCHITEW6432" -ne "ARM64")
 }
 
 # Initialization
-$dest = "$($env:ProgramData)\Microsoft\RenameComputer"
+$dest = "$($env:ProgramData)\Microsoft\Intune-RenameComputer"
 if (-not (Test-Path $dest))
 {
     mkdir $dest
 }
-Start-Transcript "$dest\RenameComputer.log" -Append
+Start-Transcript "$dest\Intune-RenameComputer.log" -Append
 
 # See if we are AD or AAD joined
 $isAD = $false
@@ -73,8 +73,8 @@ if ($isAD) {
 if ($goodToGo)
 {
     # Remove the scheduled task (if it exists)
-    Disable-ScheduledTask -TaskName "RenameComputer" -ErrorAction Ignore
-    Unregister-ScheduledTask -TaskName "RenameComputer" -Confirm:$false -ErrorAction Ignore
+    Disable-ScheduledTask -TaskName "Intune-RenameComputer" -ErrorAction Ignore
+    Unregister-ScheduledTask -TaskName "Intune-RenameComputer" -Confirm:$false -ErrorAction Ignore
     Write-Host "Scheduled task unregistered."
 
     # Get the new computer name: use the asset tag (maximum of 13 characters), or the 
@@ -90,13 +90,15 @@ if ($goodToGo)
     } else {
         $assetTag = $systemEnclosure.SMBIOSAssetTag
     }
+
     if ($assetTag.Length -gt 13) {
-        $assetTag = $assetTag.Substring(0, 13)
+        $assetTag = $assetTag.Replace("-", "").Substring(0, 13).Trim()
     }
+    
     if ($details.CsPCSystemTypeEx -eq 1) {
-        $newName = "D-$assetTag"
+        $newName = "D$assetTag"
     } else {
-        $newName = "L-$assetTag"
+        $newName = "L$assetTag"
     }
 
     # Is the computer name already set?  If so, bail out
@@ -128,7 +130,7 @@ if ($goodToGo)
             }
             else {
                 Write-Host "Initiating a restart in 10 minutes"
-                & shutdown.exe /g /t 600 /f /c "Restarting the computer due to a computer name change.  Save your work."
+                & shutdown.exe /g /t 90 /f /c "Restarting the computer due to a computer name change.  Save your work."
                 Stop-Transcript
                 Exit 0
             }
@@ -141,7 +143,7 @@ if ($goodToGo)
         Write-Host "Failed to rename computer to $($newName), creating Scheduled Task to retry later."
 
         # Check to see if already scheduled
-        $existingTask = Get-ScheduledTask -TaskName "RenameComputer" -ErrorAction SilentlyContinue
+        $existingTask = Get-ScheduledTask -TaskName "Intune-RenameComputer" -ErrorAction SilentlyContinue
         if ($existingTask -ne $null)
         {
             Write-Host "Scheduled task already exists."
@@ -150,13 +152,13 @@ if ($goodToGo)
         }
 
         # Copy myself to a safe place if not already there
-        if (-not (Test-Path "$dest\RenameComputer.ps1"))
+        if (-not (Test-Path "$dest\Intune-RenameComputer.ps1"))
         {
-            Copy-Item $PSCommandPath "$dest\RenameComputer.PS1"
+            Copy-Item $PSCommandPath "$dest\Intune-RenameComputer.PS1"
         }
 
         # Create the scheduled task action
-        $action = New-ScheduledTaskAction -Execute "Powershell.exe" -Argument "-NoProfile -ExecutionPolicy bypass -WindowStyle Hidden -File $dest\RenameComputer.ps1"
+        $action = New-ScheduledTaskAction -Execute "Powershell.exe" -Argument "-NoProfile -ExecutionPolicy bypass -WindowStyle Hidden -File $dest\Intune-RenameComputer.ps1"
 
         # Create the scheduled task trigger
         $timespan = New-Timespan -minutes 5
@@ -166,7 +168,7 @@ if ($goodToGo)
         $triggers += New-ScheduledTaskTrigger -AtStartup -RandomDelay $timespan
         
         # Register the scheduled task
-        Register-ScheduledTask -User SYSTEM -Action $action -Trigger $triggers -TaskName "RenameComputer" -Description "RenameComputer" -Force
+        Register-ScheduledTask -User SYSTEM -Action $action -Trigger $triggers -TaskName "Intune-RenameComputer" -Description "Intune Task to Rename Computer" -Force
         Write-Host "Scheduled task created."
 
 
@@ -181,8 +183,8 @@ if ($goodToGo)
 else
 {
     # Check to see if already scheduled
-    $existingTask = Get-ScheduledTask -TaskName "RenameComputer" -ErrorAction SilentlyContinue
-    if ($existingTask -ne $null)
+    $existingTask = Get-ScheduledTask -TaskName "Intune-RenameComputer" -ErrorAction SilentlyContinue
+    if ($null -ne $existingTask)
     {
         Write-Host "Scheduled task already exists."
         Stop-Transcript
@@ -190,13 +192,13 @@ else
     }
 
     # Copy myself to a safe place if not already there
-    if (-not (Test-Path "$dest\RenameComputer.ps1"))
+    if (-not (Test-Path "$dest\Intune-RenameComputer.ps1"))
     {
-        Copy-Item $PSCommandPath "$dest\RenameComputer.PS1"
+        Copy-Item $PSCommandPath "$dest\Intune-RenameComputer.PS1"
     }
 
     # Create the scheduled task action
-    $action = New-ScheduledTaskAction -Execute "Powershell.exe" -Argument "-NoProfile -ExecutionPolicy bypass -WindowStyle Hidden -File $dest\RenameComputer.ps1"
+    $action = New-ScheduledTaskAction -Execute "Powershell.exe" -Argument "-NoProfile -ExecutionPolicy bypass -WindowStyle Hidden -File $dest\Intune-RenameComputer.ps1"
 
     # Create the scheduled task trigger
     $timespan = New-Timespan -minutes 5
@@ -206,7 +208,7 @@ else
     $triggers += New-ScheduledTaskTrigger -AtStartup -RandomDelay $timespan
     
     # Register the scheduled task
-    Register-ScheduledTask -User SYSTEM -Action $action -Trigger $triggers -TaskName "RenameComputer" -Description "RenameComputer" -Force
+    Register-ScheduledTask -User SYSTEM -Action $action -Trigger $triggers -TaskName "Intune-RenameComputer" -Description "Intune-RenameComputer" -Force
     Write-Host "Scheduled task created."
 }
 
