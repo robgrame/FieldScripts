@@ -130,7 +130,7 @@ if ($goodToGo)
             }
             else {
                 Write-Host "Initiating a restart in 10 minutes"
-                & shutdown.exe /g /t 90 /f /c "Restarting the computer due to a computer name change.  Save your work."
+                & shutdown.exe /g /t 30 /f /c "Restarting the computer due to a computer name change.  Save your work."
                 Stop-Transcript
                 Exit 0
             }
@@ -144,7 +144,7 @@ if ($goodToGo)
 
         # Check to see if already scheduled
         $existingTask = Get-ScheduledTask -TaskName "Intune-RenameComputer" -ErrorAction SilentlyContinue
-        if ($existingTask -ne $null)
+        if ($null -ne $existingTask)
         {
             Write-Host "Scheduled task already exists."
             Stop-Transcript
