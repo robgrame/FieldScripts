@@ -1,136 +1,78 @@
 # Get Windows 365 Alerts from Microsoft Graph API
 # This script retrieves alert records from the Device Management monitoring endpoint
-# Uses Microsoft Graph PowerShell module to avoid app registration requirements
+# Uses only REST API calls - no PowerShell modules required
 
 param(
     [Parameter(HelpMessage = "Output file path for JSON response (optional)")]
     [string]$OutputPath,
     
-    [Parameter(HelpMessage = "Tenant ID (optional, will use current tenant if not specified)")]
+    [Parameter(HelpMessage = "Tenant ID (required for authentication)")]
     [string]$TenantId = "d6dbad84-5922-4700-a049-c7068c37c884",
     
-    [Parameter(HelpMessage = "Use alternative authentication method (REST API with device code)")]
-    [switch]$UseRestAPI,
+    [Parameter(HelpMessage = "Request offline access for longer token validity")]
+    [switch]$OfflineAccess,
     
-    [Parameter(HelpMessage = "Request offline access for longer token validity (REST API method only)")]
-    [switch]$OfflineAccess
+    [Parameter(HelpMessage = "Use Azure CLI for authentication instead of device code flow")]
+    [switch]$UseAzureCLI
 )
 
-# Function to check and install Microsoft Graph PowerShell module
-function Install-GraphModule {
-    Write-Host "Checking for Microsoft Graph PowerShell module..." -ForegroundColor Yellow
-    
-    $modules = @("Microsoft.Graph.Authentication", "Microsoft.Graph.DeviceManagement")
-    
-    foreach ($module in $modules) {
-        if (!(Get-Module -ListAvailable -Name $module)) {
-            Write-Host "Installing $module..." -ForegroundColor Yellow
-            try {
-                Install-Module -Name $module -Scope CurrentUser -Force -AllowClobber
-                Write-Host "$module installed successfully!" -ForegroundColor Green
-            }
-            catch {
-                Write-Error "Failed to install $module`: $($_.Exception.Message)"
-                return $false
-            }
-        }
-        else {
-            Write-Host "$module is already installed." -ForegroundColor Green
-        }
-    }
-    return $true
-}
-
-# Function to connect to Microsoft Graph using PowerShell module
-function Connect-ToGraph {
-    param(
-        [string]$TenantId
-    )
-    
-    Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Yellow
-    
+# Function to check if Azure CLI is installed and get token
+function Get-AccessTokenFromAzureCLI {
     try {
-        # Import required modules
-        Import-Module Microsoft.Graph.Authentication -Force
-        Import-Module Microsoft.Graph.DeviceManagement -Force
+        # Check if Azure CLI is installed
+        $azVersion = az --version 2>$null
+        if (-not $azVersion) {
+            Write-Host "Azure CLI is not installed. Please install it or use device code flow." -ForegroundColor Red
+            return $null
+        }
         
-        # Required scopes
-        $scopes = @(
-            "DeviceManagementConfiguration.Read.All",
-            "DeviceManagementManagedDevices.Read.All"
-        )
+        Write-Host "Using Azure CLI for authentication..." -ForegroundColor Yellow
         
-        # Connect to Graph
-        if ($TenantId -and $TenantId -ne "common") {
-            Connect-MgGraph -TenantId $TenantId -Scopes $scopes -NoWelcome
+        # Check if already logged in
+        $account = az account show 2>$null | ConvertFrom-Json
+        if (-not $account) {
+            Write-Host "Not logged into Azure CLI. Please run: az login" -ForegroundColor Red
+            return $null
+        }
+        
+        Write-Host "Getting access token from Azure CLI..." -ForegroundColor Gray
+        
+        # Get access token for Microsoft Graph
+        $tokenResponse = az account get-access-token --resource https://graph.microsoft.com --only-show-errors | ConvertFrom-Json
+        
+        if ($tokenResponse -and $tokenResponse.accessToken) {
+            Write-Host "Successfully obtained access token from Azure CLI!" -ForegroundColor Green
+            return $tokenResponse.accessToken
         }
         else {
-            Connect-MgGraph -Scopes $scopes -NoWelcome
-        }
-        
-        # Verify connection
-        $context = Get-MgContext
-        if ($context) {
-            Write-Host "Successfully connected to Microsoft Graph!" -ForegroundColor Green
-            Write-Host "Tenant: $($context.TenantId)" -ForegroundColor Cyan
-            Write-Host "Account: $($context.Account)" -ForegroundColor Cyan
-            return $true
-        }
-        else {
-            Write-Error "Failed to establish Graph connection"
-            return $false
+            Write-Error "Failed to obtain access token from Azure CLI"
+            return $null
         }
     }
     catch {
-        Write-Error "Failed to connect to Microsoft Graph: $($_.Exception.Message)"
-        return $false
-    }
-}
-
-# Function to get Windows 365 alerts using Graph PowerShell module
-function Get-Windows365AlertsWithModule {
-    try {
-        Write-Host "Retrieving Windows 365 alerts using Graph PowerShell module..." -ForegroundColor Yellow
-        
-        # Use Invoke-MgGraphRequest for beta endpoint
-        $response = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/deviceManagement/monitoring/alertRecords" -Method GET
-        
-        Write-Host "Successfully retrieved alerts!" -ForegroundColor Green
-        Write-Host "Total alerts found: $($response.value.Count)" -ForegroundColor Cyan
-        
-        return $response
-    }
-    catch {
-        Write-Error "Failed to retrieve alerts: $($_.Exception.Message)"
-        
-        if ($_.Exception.Message -match "403") {
-            Write-Host "Access denied. Please ensure you have the required permissions:" -ForegroundColor Red
-            Write-Host "- DeviceManagementConfiguration.Read.All" -ForegroundColor Red
-            Write-Host "- DeviceManagementManagedDevices.Read.All" -ForegroundColor Red
-        }
-        
+        Write-Error "Failed to get access token from Azure CLI: $($_.Exception.Message)"
         return $null
     }
 }
 
-# Function to get access token using device code flow (fallback method)
-function Get-AccessToken {
+# Function to get access token using device code flow
+function Get-AccessTokenDeviceCode {
     param(
-        [string]$TenantId = "d6dbad84-5922-4700-a049-c7068c37c884",
+        [string]$TenantId,
         [string]$ClientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e", # Microsoft Graph PowerShell Client ID
         [bool]$OfflineAccess = $false
     )
     
-    Write-Host "Using REST API authentication method..." -ForegroundColor Yellow
+    Write-Host "Using device code flow for authentication..." -ForegroundColor Yellow
     
-    # Device code flow endpoint
+    # Device code flow endpoints
     $deviceCodeUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode"
     $tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
     
     # Required scope for Device Management
     $scope = "https://graph.microsoft.com/CloudPC.Read.All"
     
-    # Add offline access if requested (provides refresh token and longer session)
+    # Add offline access if requested
     if ($OfflineAccess) {
         $scope += " offline_access"
         Write-Host "Requesting offline access for extended session..." -ForegroundColor Cyan
@@ -187,29 +129,25 @@ function Get-AccessToken {
                         $errorContent = $_.ErrorDetails.Message | ConvertFrom-Json
                     }
                     catch {
-                        # Fallback for older PowerShell versions or different error formats
+                        # Fallback for older PowerShell versions
                         try {
                             $errorResponse = $_.Exception.Response.GetResponseStream()
                             $reader = New-Object System.IO.StreamReader($errorResponse)
                             $errorContent = $reader.ReadToEnd() | ConvertFrom-Json
                         }
                         catch {
-                            # If all else fails, create a basic error object
                             $errorContent = @{ error = "unknown_error"; error_description = "Unable to parse error response" }
                         }
                     }
                     
                     if ($errorContent.error -eq "authorization_pending") {
-                        # Continue polling
                         continue
                     }
                     elseif ($errorContent.error -eq "authorization_declined") {
                         throw "Authentication was declined by the user"
                     }
                     elseif ($errorContent.error -eq "expired_token") {
-                        Write-Host "`nThe device code has expired. You can:" -ForegroundColor Red
-                        Write-Host "1. Run the script again to get a new code" -ForegroundColor Yellow
-                        Write-Host "2. Or use the Graph PowerShell module method (run without -UseRestAPI)" -ForegroundColor Yellow
+                        Write-Host "`nThe device code has expired. Please run the script again." -ForegroundColor Red
                         throw "The device code has expired. Please run the script again."
                     }
                     else {
@@ -222,9 +160,7 @@ function Get-AccessToken {
             }
         } while ([DateTime]::Now -lt $timeout)
         
-        Write-Host "`nAuthentication timed out. You can:" -ForegroundColor Red
-        Write-Host "1. Run the script again to get a new code" -ForegroundColor Yellow
-        Write-Host "2. Or use the Graph PowerShell module method (run without -UseRestAPI)" -ForegroundColor Yellow
+        Write-Host "`nAuthentication timed out. Please run the script again." -ForegroundColor Red
         throw "Authentication timed out. Please run the script again."
     }
     catch {
@@ -233,7 +169,7 @@ function Get-AccessToken {
     }
 }
 
-# Function to get Windows 365 alerts
+# Function to get Windows 365 alerts using REST API
 function Get-Windows365Alerts {
     param(
         [string]$AccessToken
@@ -242,6 +178,7 @@ function Get-Windows365Alerts {
     $headers = @{
         'Authorization' = "Bearer $AccessToken"
         'Content-Type' = 'application/json'
+        'User-Agent' = 'PowerShell-GraphAPI-Client'
     }
     
     $graphUri = "https://graph.microsoft.com/beta/deviceManagement/monitoring/alertRecords"
@@ -249,7 +186,11 @@ function Get-Windows365Alerts {
     try {
         Write-Host "Retrieving Windows 365 alerts..." -ForegroundColor Yellow
         
-        $response = Invoke-RestMethod -Uri $graphUri -Headers $headers -Method GET
+        # Use Invoke-WebRequest for consistency
+        $webResponse = Invoke-WebRequest -Uri $graphUri -Headers $headers -Method GET -UseBasicParsing
+        
+        # Parse the JSON response
+        $response = $webResponse.Content | ConvertFrom-Json
         
         Write-Host "Successfully retrieved alerts!" -ForegroundColor Green
         Write-Host "Total alerts found: $($response.value.Count)" -ForegroundColor Cyan
@@ -273,6 +214,7 @@ function Get-Windows365Alerts {
         
         if ($statusCode -eq 403 -or $_.Exception.Message -match "403") {
             Write-Host "Access denied. Please ensure you have the required permissions:" -ForegroundColor Red
+            Write-Host "- CloudPC.Read.All" -ForegroundColor Red
             Write-Host "- DeviceManagementConfiguration.Read.All" -ForegroundColor Red
             Write-Host "- Or appropriate admin role (Intune Administrator, Global Administrator, etc.)" -ForegroundColor Red
         }
@@ -286,48 +228,38 @@ function Get-Windows365Alerts {
 
 # Main script execution
 Write-Host "=== Windows 365 Alerts Retriever ===" -ForegroundColor Magenta
-Write-Host "This script will retrieve Windows 365 alert records from Microsoft Graph API" -ForegroundColor White
+Write-Host "This script retrieves Windows 365 alert records from Microsoft Graph API" -ForegroundColor White
+Write-Host "No PowerShell modules required - uses only REST API calls!" -ForegroundColor Green
 Write-Host ""
 
-# Choose authentication method
-if ($UseRestAPI) {
-    Write-Host "Using REST API authentication method..." -ForegroundColor Cyan
-    
-    # Get access token
-    $accessToken = Get-AccessToken -TenantId $TenantId -OfflineAccess $OfflineAccess
+# Get access token using preferred method
+$accessToken = $null
 
-    if (-not $accessToken) {
-        Write-Host "Failed to obtain access token. Exiting." -ForegroundColor Red
-        exit 1
-    }
-
-    Write-Host "Authentication successful!" -ForegroundColor Green
-    Write-Host ""
-
-    # Get alerts using REST API
-    $alertsResponse = Get-Windows365Alerts -AccessToken $accessToken
+if ($UseAzureCLI) {
+    Write-Host "Using Azure CLI authentication method..." -ForegroundColor Cyan
+    $accessToken = Get-AccessTokenFromAzureCLI
 }
 else {
-    Write-Host "Using Microsoft Graph PowerShell module (recommended)..." -ForegroundColor Cyan
-    
-    # Check and install Graph module if needed
-    if (-not (Install-GraphModule)) {
-        Write-Host "Failed to install required modules. Exiting." -ForegroundColor Red
-        exit 1
-    }
-    
-    # Connect to Graph
-    if (-not (Connect-ToGraph -TenantId $TenantId)) {
-        Write-Host "Failed to connect to Microsoft Graph. Exiting." -ForegroundColor Red
-        exit 1
-    }
-    
-    # Get alerts using Graph module
-    $alertsResponse = Get-Windows365AlertsWithModule
-    
-    # Disconnect from Graph
-    Disconnect-MgGraph | Out-Null
+    Write-Host "Using device code flow authentication method..." -ForegroundColor Cyan
+    $accessToken = Get-AccessTokenDeviceCode -TenantId $TenantId -OfflineAccess $OfflineAccess
 }
+
+if (-not $accessToken) {
+    Write-Host "Failed to obtain access token. Exiting." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Available authentication methods:" -ForegroundColor Yellow
+    Write-Host "1. Device code flow (default): .\Get-Windows365Alerts.ps1" -ForegroundColor White
+    Write-Host "2. Azure CLI: .\Get-Windows365Alerts.ps1 -UseAzureCLI" -ForegroundColor White
+    Write-Host ""
+    Write-Host "For Azure CLI method, ensure you're logged in: az login" -ForegroundColor Gray
+    exit 1
+}
+
+Write-Host "Authentication successful!" -ForegroundColor Green
+Write-Host ""
+
+# Get alerts using REST API
+$alertsResponse = Get-Windows365Alerts -AccessToken $accessToken
 
 if ($alertsResponse) {
     if ($OutputPath) {
