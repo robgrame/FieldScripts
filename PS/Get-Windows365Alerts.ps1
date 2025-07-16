@@ -226,6 +226,141 @@ function Get-Windows365Alerts {
     }
 }
 
+# Function to get inaccessible Cloud PC reports using REST API
+function Get-InaccessibleCloudPCReports {
+    param(
+        [string]$AccessToken
+    )
+    
+    $headers = @{
+        'Authorization' = "Bearer $AccessToken"
+        'Content-Type' = 'application/json'
+        'User-Agent' = 'PowerShell-GraphAPI-Client'
+    }
+    
+    $graphUri = "https://graph.microsoft.com/beta/deviceManagement/virtualEndpoint/reports/getInaccessibleCloudPcReports"
+    
+    # JSON payload for the POST request
+    $payload = @{
+        "top" = 50
+        "skip" = 0
+        "search" = ""
+        "filter" = ""
+        "select" = @(
+            "cloudPcId",
+            "userPrincipalName",
+            "cloudPcName",
+            "provisioningStatus",
+            "deviceHealthStatus",
+            "deviceHealthStatusDateTime",
+            "systemStatus",
+            "systemStatusDateTime",
+            "region",
+            "lastConnectionFailureDatetime",
+            "lastEventDatetime",
+            "eligibleCrossRegion",
+            "lastFleetWorkItemStatus",
+            "lastFleetWorkItemType",
+            "recentConnectionError"
+        )
+        "orderBy" = @(
+            "cloudPcName"
+        )
+    }
+    
+    $jsonPayload = $payload | ConvertTo-Json -Depth 5
+    
+    try {
+        Write-Host "Retrieving inaccessible Cloud PC reports..." -ForegroundColor Yellow
+        
+        # Use Invoke-WebRequest with POST method
+        $webResponse = Invoke-WebRequest -Uri $graphUri -Headers $headers -Method POST -Body $jsonPayload -UseBasicParsing
+        
+        # Handle encoding conversion to UTF-8
+        $responseContent = $webResponse.Content
+        if ($webResponse.Content -is [byte[]]) {
+            # Convert byte array to UTF-8 string
+            $responseContent = [System.Text.Encoding]::UTF8.GetString($webResponse.Content)
+        }
+        elseif ($webResponse.RawContent -and $webResponse.Headers.'Content-Type' -notmatch 'charset=utf-8') {
+            # Try to detect and convert encoding if not UTF-8
+            try {
+                $bytes = [System.Text.Encoding]::Default.GetBytes($responseContent)
+                $responseContent = [System.Text.Encoding]::UTF8.GetString($bytes)
+            }
+            catch {
+                Write-Host "Warning: Could not convert response encoding, using original content" -ForegroundColor Yellow
+            }
+        }
+        
+        # Parse the JSON response
+        $rawResponse = $responseContent | ConvertFrom-Json
+        
+        # Transform the tabular response format to standard format
+        $transformedResponse = @{
+            value = @()
+            totalRowCount = $rawResponse.TotalRowCount
+        }
+        
+        if ($rawResponse.Values -and $rawResponse.Schema) {
+            Write-Host "Processing tabular response format..." -ForegroundColor Gray
+            Write-Host "Schema columns: $($rawResponse.Schema.Count), Data rows: $($rawResponse.Values.Count)" -ForegroundColor Gray
+            
+            # Create objects from the tabular data
+            foreach ($row in $rawResponse.Values) {
+                $cloudPcObject = @{}
+                
+                # Map each value to its corresponding column name
+                for ($i = 0; $i -lt $rawResponse.Schema.Count; $i++) {
+                    $columnName = $rawResponse.Schema[$i].Column
+                    $value = $row[$i]
+                    
+                    # Handle null values and convert types if needed
+                    if ($value -eq $null -or $value -eq "") {
+                        $cloudPcObject[$columnName] = $null
+                    } else {
+                        $cloudPcObject[$columnName] = $value
+                    }
+                }
+                
+                $transformedResponse.value += $cloudPcObject
+            }
+        }
+        
+        Write-Host "Successfully retrieved inaccessible Cloud PC reports!" -ForegroundColor Green
+        Write-Host "Total inaccessible Cloud PCs found: $($transformedResponse.value.Count)" -ForegroundColor Cyan
+        
+        return $transformedResponse
+    }
+    catch {
+        # Handle different PowerShell versions for error response
+        $statusCode = $null
+        $statusDescription = $null
+        
+        if ($_.Exception.Response) {
+            $statusCode = $_.Exception.Response.StatusCode
+            $statusDescription = $_.Exception.Response.StatusDescription
+        }
+        elseif ($_.Exception.Message) {
+            $statusDescription = $_.Exception.Message
+        }
+        
+        Write-Error "Failed to retrieve inaccessible Cloud PC reports. Status: $statusCode - $statusDescription"
+        
+        if ($statusCode -eq 403 -or $_.Exception.Message -match "403") {
+            Write-Host "Access denied. Please ensure you have the required permissions:" -ForegroundColor Red
+            Write-Host "- CloudPC.Read.All" -ForegroundColor Red
+            Write-Host "- DeviceManagementConfiguration.Read.All" -ForegroundColor Red
+            Write-Host "- Or appropriate admin role (Intune Administrator, Global Administrator, etc.)" -ForegroundColor Red
+        }
+        elseif ($statusCode -eq 401 -or $_.Exception.Message -match "401") {
+            Write-Host "Authentication failed. Please run the script again." -ForegroundColor Red
+        }
+        
+        return $null
+    }
+}
+
 # Main script execution
 Write-Host "=== Windows 365 Alerts Retriever ===" -ForegroundColor Magenta
 Write-Host "This script retrieves Windows 365 alert records from Microsoft Graph API" -ForegroundColor White
@@ -261,21 +396,30 @@ Write-Host ""
 # Get alerts using REST API
 $alertsResponse = Get-Windows365Alerts -AccessToken $accessToken
 
-if ($alertsResponse) {
+# Get inaccessible Cloud PC reports using REST API
+$inaccessibleReportsResponse = Get-InaccessibleCloudPCReports -AccessToken $accessToken
+
+# Process and display results
+if ($alertsResponse -or $inaccessibleReportsResponse) {
     if ($OutputPath) {
-        # Save JSON to file if requested
+        # Save combined JSON to file if requested
         try {
-            $jsonOutput = $alertsResponse | ConvertTo-Json -Depth 10
+            $combinedOutput = @{
+                "alerts" = $alertsResponse
+                "inaccessibleCloudPCs" = $inaccessibleReportsResponse
+                "retrievedAt" = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+            }
+            $jsonOutput = $combinedOutput | ConvertTo-Json -Depth 10
             $jsonOutput | Out-File -FilePath $OutputPath -Encoding UTF8
-            Write-Host "JSON response saved to: $OutputPath" -ForegroundColor Green
+            Write-Host "Combined JSON response saved to: $OutputPath" -ForegroundColor Green
         }
         catch {
             Write-Error "Failed to save output to file: $($_.Exception.Message)"
         }
     }
     
-    # Display results in table format
-    if ($alertsResponse.value -and $alertsResponse.value.Count -gt 0) {
+    # Display alerts table
+    if ($alertsResponse -and $alertsResponse.value -and $alertsResponse.value.Count -gt 0) {
         Write-Host "`n=== Windows 365 Alerts Table ===" -ForegroundColor Magenta
         Write-Host "Total Alerts Found: $($alertsResponse.value.Count)" -ForegroundColor Cyan
         Write-Host ""
@@ -338,18 +482,117 @@ if ($alertsResponse) {
             Name = 'Alert ID'
             Expression = { 
                 if ($_.id) { 
-                    $_.id.Substring(0, [Math]::Min(8, $_.id.Length)) + "..." 
+                    $_.id
                 } else { 
                     'Unknown' 
                 }
             }
         }
         
-        # Display the table
-        $alertTable | Format-Table -AutoSize -Wrap
+        # Display the alerts table with full column widths
+        $alertTable | Format-Table -Property * -AutoSize -Wrap
+    }
+    else {
+        Write-Host "`n=== No Alerts Found ===" -ForegroundColor Yellow
+        Write-Host "No Windows 365 alerts were found in your tenant." -ForegroundColor White
+    }
+    
+    # Display inaccessible Cloud PC reports table
+    if ($inaccessibleReportsResponse -and $inaccessibleReportsResponse.value -and $inaccessibleReportsResponse.value.Count -gt 0) {
+        Write-Host "`n=== Inaccessible Cloud PC Reports ===" -ForegroundColor Magenta
+        Write-Host "Total Inaccessible Cloud PCs: $($inaccessibleReportsResponse.value.Count)" -ForegroundColor Cyan
+        Write-Host ""
         
-        # Display summary statistics
-        Write-Host "`n=== Summary Statistics ===" -ForegroundColor Magenta
+        # Create table with key Cloud PC information
+        $cloudPcTable = $inaccessibleReportsResponse.value | Select-Object @{
+            Name = 'Cloud PC Name'
+            Expression = { 
+                if ($_.cloudPcName) { 
+                    $_.cloudPcName 
+                } else { 
+                    'Unknown' 
+                }
+            }
+        }, @{
+            Name = 'User'
+            Expression = { 
+                if ($_.userPrincipalName) { 
+                    $_.userPrincipalName 
+                } else { 
+                    'Unknown' 
+                }
+            }
+        }, @{
+            Name = 'Provisioning Status'
+            Expression = { 
+                if ($_.provisioningStatus) { 
+                    $_.provisioningStatus 
+                } else { 
+                    'Unknown' 
+                }
+            }
+        }, @{
+            Name = 'Device Health'
+            Expression = { 
+                if ($_.deviceHealthStatus) { 
+                    $_.deviceHealthStatus 
+                } else { 
+                    'Unknown' 
+                }
+            }
+        }, @{
+            Name = 'System Status'
+            Expression = { 
+                if ($_.systemStatus) { 
+                    $_.systemStatus 
+                } else { 
+                    'Unknown' 
+                }
+            }
+        }, @{
+            Name = 'Region'
+            Expression = { 
+                if ($_.region) { 
+                    $_.region 
+                } else { 
+                    'Unknown' 
+                }
+            }
+        }, @{
+            Name = 'Last Connection Failure'
+            Expression = { 
+                if ($_.lastConnectionFailureDatetime) { 
+                    try {
+                        [DateTime]::Parse($_.lastConnectionFailureDatetime).ToString("yyyy-MM-dd HH:mm:ss")
+                    } catch {
+                        $_.lastConnectionFailureDatetime
+                    }
+                } else { 
+                    'Unknown' 
+                }
+            }
+        }, @{
+            Name = 'Cloud PC ID'
+            Expression = { 
+                if ($_.cloudPcId) { 
+                    $_.cloudPcId
+                } else { 
+                    'Unknown' 
+                }
+            }
+        }
+        
+        # Display the Cloud PC table with full column widths
+        $cloudPcTable | Format-Table -Property * -AutoSize -Wrap
+    }
+    else {
+        Write-Host "`n=== No Inaccessible Cloud PCs Found ===" -ForegroundColor Yellow
+        Write-Host "No inaccessible Cloud PCs were found in your tenant." -ForegroundColor White
+    }
+    
+    # Display combined summary statistics
+    if ($alertsResponse -and $alertsResponse.value -and $alertsResponse.value.Count -gt 0) {
+        Write-Host "`n=== Alert Summary Statistics ===" -ForegroundColor Magenta
         
         # Status summary
         $statusSummary = $alertsResponse.value | Group-Object -Property status | Sort-Object Count -Descending
@@ -400,17 +643,44 @@ if ($alertsResponse) {
             }
         }
     }
-    else {
-        Write-Host "`n=== No Alerts Found ===" -ForegroundColor Yellow
-        Write-Host "No Windows 365 alerts were found in your tenant." -ForegroundColor White
-        Write-Host "This could mean:" -ForegroundColor Gray
-        Write-Host "  - No alerts have been triggered" -ForegroundColor Gray
-        Write-Host "  - Alerts may have been resolved and archived" -ForegroundColor Gray
-        Write-Host "  - You may not have access to view alerts" -ForegroundColor Gray
+    
+    # Display Cloud PC summary statistics
+    if ($inaccessibleReportsResponse -and $inaccessibleReportsResponse.value -and $inaccessibleReportsResponse.value.Count -gt 0) {
+        Write-Host "`n=== Cloud PC Summary Statistics ===" -ForegroundColor Magenta
+        
+        # Provisioning status summary
+        $provisioningSummary = $inaccessibleReportsResponse.value | Group-Object -Property provisioningStatus | Sort-Object Count -Descending
+        if ($provisioningSummary) {
+            Write-Host "`nCloud PCs by Provisioning Status:" -ForegroundColor Cyan
+            $provisioningSummary | ForEach-Object {
+                $status = if ($_.Name) { $_.Name } else { "Unknown" }
+                Write-Host "  $status`: $($_.Count)" -ForegroundColor White
+            }
+        }
+        
+        # Device health summary
+        $healthSummary = $inaccessibleReportsResponse.value | Group-Object -Property deviceHealthStatus | Sort-Object Count -Descending
+        if ($healthSummary) {
+            Write-Host "`nCloud PCs by Device Health:" -ForegroundColor Cyan
+            $healthSummary | ForEach-Object {
+                $health = if ($_.Name) { $_.Name } else { "Unknown" }
+                Write-Host "  $health`: $($_.Count)" -ForegroundColor White
+            }
+        }
+        
+        # Region summary
+        $regionSummary = $inaccessibleReportsResponse.value | Group-Object -Property region | Sort-Object Count -Descending
+        if ($regionSummary) {
+            Write-Host "`nCloud PCs by Region:" -ForegroundColor Cyan
+            $regionSummary | ForEach-Object {
+                $region = if ($_.Name) { $_.Name } else { "Unknown" }
+                Write-Host "  $region`: $($_.Count)" -ForegroundColor White
+            }
+        }
     }
 }
 else {
-    Write-Host "No alerts retrieved or an error occurred." -ForegroundColor Red
+    Write-Host "No data retrieved from either API or an error occurred." -ForegroundColor Red
     exit 1
 }
 
